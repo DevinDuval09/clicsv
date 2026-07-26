@@ -7,12 +7,12 @@ import (
 )
 
 const (
-	ctrlC      byte = 0x03
-	enterCR    byte = '\r'
-	enterLF    byte = '\n'
-	backspace  byte = 0x7f
-	backspace2 byte = 0x08
-	escape     byte = 0x1b
+	ctrlC      byte = 0x03 // ETX, sent when the user presses Ctrl+C in raw mode
+	enterCR    byte = '\r' // 0x0d, carriage return (most terminals send this for Enter)
+	enterLF    byte = '\n' // 0x0a, line feed (sent for Enter by some terminals/pipes)
+	backspace  byte = 0x7f // DEL, what most terminals send for the Backspace key
+	backspace2 byte = 0x08 // BS, backspace byte sent by some terminals/emulators instead of DEL
+	escape     byte = 0x1b // ESC, prefix byte for arrow keys and other escape sequences
 )
 
 func main() {
@@ -65,7 +65,7 @@ func main() {
 			}
 		case b == escape:
 			// Not handled in this proof of concept; ignored.
-		case b >= 0x20 && b < 0x7f:
+		case b >= 0x20 && b < 0x7f: // printable ASCII range (space through '~')
 			inputText += string(rune(b))
 		}
 
@@ -80,10 +80,10 @@ func draw(w *bufio.Writer, rows, cols int, echoText, inputText string) {
 	inputLine := truncate(fmt.Sprintf("input: %s", inputText), cols)
 	mid := rows / 2
 
-	w.WriteString("\x1b[?25l") // hide cursor
-	w.WriteString("\x1b[2J")   // clear screen
-	fmt.Fprintf(w, "\x1b[%d;1H%s", mid, echoLine)
-	fmt.Fprintf(w, "\x1b[%d;1H%s", rows, inputLine)
+	w.WriteString("\x1b[?25l")                            // hide cursor
+	w.WriteString("\x1b[2J")                              // clear screen
+	fmt.Fprintf(w, "\x1b[%d;1H%s", mid, echoLine)         // move cursor to (mid, 1) and print echo line
+	fmt.Fprintf(w, "\x1b[%d;1H%s", rows, inputLine)       // move cursor to (rows, 1) and print input line
 	fmt.Fprintf(w, "\x1b[%d;%dH", rows, len(inputLine)+1) // cursor at end of input
 	w.WriteString("\x1b[?25h")                            // show cursor
 	w.Flush()
@@ -91,7 +91,7 @@ func draw(w *bufio.Writer, rows, cols int, echoText, inputText string) {
 
 // quit clears the screen, restores the cursor, and flushes before exit.
 func quit(w *bufio.Writer) {
-	w.WriteString("\x1b[2J\x1b[H\x1b[?25h")
+	w.WriteString("\x1b[2J\x1b[H\x1b[?25h") // clear screen, move cursor to (1,1), show cursor
 	w.Flush()
 }
 
