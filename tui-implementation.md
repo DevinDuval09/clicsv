@@ -1,10 +1,13 @@
 # TUI Implementation Plan
 
 This document outlines plans for implementing the terminal UI on Linux and
-on Windows using only the Go standard library. Both platforms share the
-same OS-agnostic core (`editor.go`, `render.go`, `csvmodel.go`) and the same
-mode/event-loop design described in `requirements.md`; only raw-mode/input
-handling differ per platform, isolated behind Go build tags.
+on Windows. Both platforms share the same OS-agnostic core (`editor.go`,
+`render.go`, `csvmodel.go`) and the same mode/event-loop design described in
+`requirements.md`; only raw-mode/input handling differ per platform,
+isolated behind Go build tags. The Linux raw-mode implementation
+(Part 1, Section 1) uses the `golang.org/x/sys/unix` module rather than the
+standard library alone — see the note there and the Open Questions section
+for the resulting conflict with `requirements.md`'s stdlib-only constraint.
 
 ## Part 1: Linux Implementation
 
@@ -16,31 +19,41 @@ by the kernel's line discipline before the program ever sees them. To read
 individual keystrokes (including arrow keys) as they happen, the program
 must put the terminal into raw mode.
 
-#TODO: replace syscall package with x sys unix
-
-- Use the `syscall` package to issue `ioctl` calls against the file
-  descriptor for `/dev/tty` (or `os.Stdin.Fd()`), using `syscall.Syscall`
-  with `SYS_IOCTL`.
-- Read the current terminal settings with `TCGETS` into a `termios` struct
-  (fields: `Iflag`, `Oflag`, `Cflag`, `Lflag`, `Cc [20]byte`, etc. — matches
-  `unix.Termios` layout, but defined locally so no external package is
-  needed).
+- Use `golang.org/x/sys/unix` to issue the `ioctl` calls against the file
+  descriptor for `/dev/tty` (or `os.Stdin.Fd()`), via `unix.IoctlGetTermios`
+  and `unix.IoctlSetTermios`, rather than hand-rolling `syscall.Syscall`
+  with `SYS_IOCTL` and a locally-defined `termios` struct. `x/sys/unix` is
+  maintained in lockstep with the Go standard library by the Go team and
+  provides the correct per-architecture `unix.Termios` layout and ioctl
+  request constants (`unix.TCGETS`, `unix.TCSETS`, `unix.TIOCGWINSZ`)
+  directly, which avoids reimplementing/maintaining those constants and
+  struct layouts by hand.
+- Read the current terminal settings with `unix.IoctlGetTermios(fd,
+  unix.TCGETS)`, which returns a `*unix.Termios` (fields: `Iflag`, `Oflag`,
+  `Cflag`, `Lflag`, `Cc [...]byte`, etc.).
 - Modify flags to enter raw mode:
   - Clear `ECHO`, `ICANON`, `ISIG`, `IEXTEN` in `Lflag`.
   - Clear `IXON`, `ICRNL`, `BRKINT`, `INPCK`, `ISTRIP` in `Iflag`.
   - Clear `OPOST` in `Oflag`.
-  - Set `Cc[VMIN] = 1`, `Cc[VTIME] = 0` so reads block until at least one
-    byte is available.
-- Apply the modified struct with `TCSETS`.
-- Save the original `termios` value at startup and restore it with `TCSETS`
+  - Set `Cc[unix.VMIN] = 1`, `Cc[unix.VTIME] = 0` so reads block until at
+    least one byte is available.
+- Apply the modified struct with `unix.IoctlSetTermios(fd, unix.TCSETS,
+  &termios)`.
+- Save the original `termios` value at startup and restore it the same way
   on exit (including on panics — use `defer` plus a `recover` at the top of
   `main`) so the user's shell isn't left in a broken state.
 
 Component: `terminal_linux.go`
-- `enableRawMode() (*termios, error)` — returns the original state.
-- `restoreMode(orig *termios) error`.
-- `getWindowSize() (rows, cols int, err error)` — via `TIOCGWINSZ` ioctl, so
-  the display can size itself to the terminal and react to resizes.
+- `enableRawMode() (*unix.Termios, error)` — returns the original state.
+- `restoreMode(orig *unix.Termios) error`.
+- `getWindowSize() (rows, cols int, err error)` — via `unix.IoctlGetWinsize`
+  (`TIOCGWINSZ`), so the display can size itself to the terminal and react
+  to resizes.
+
+> **Note:** this introduces `golang.org/x/sys` as a module dependency
+> (`go.mod`/`go.sum`), which conflicts with the "no third-party
+> dependencies" constraint in `requirements.md`. That constraint should be
+> revisited/updated before this is implemented — see Open Questions.
 
 ### 2. Reading input
 
@@ -287,6 +300,16 @@ codebase.
 
 ## Open questions / follow-ups
 
+- `requirements.md` currently states "Implemented using only packages from
+  the Go standard library. No third-party dependencies (including
+  terminal/TUI libraries) are permitted." The Linux termios/ioctl handling
+  in Part 1, Section 1 depends on `golang.org/x/sys/unix`, which is a
+  third-party module (it requires a `go.mod`/`go.sum` entry) even though it
+  is maintained by the Go team. This conflict needs to be resolved before
+  implementation: either relax the `requirements.md` constraint to
+  explicitly permit `golang.org/x/sys`, or revert Part 1, Section 1 to the
+  hand-rolled `syscall.Syscall`/`SYS_IOCTL` approach with a locally-defined
+  `termios` struct.
 - Exact key used to enter Command mode from Navigate mode (a dedicated key
   like `:` vs. any non-arrow keystroke) should be pinned down and reflected
   back into `requirements.md`.

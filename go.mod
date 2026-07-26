@@ -1,3 +1,5 @@
 module github.com/DevinDuval09/clicsv
 
-go 1.23.4
+go 1.25.0
+
+require golang.org/x/sys v0.47.0
