@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"container/list"
 	"fmt"
 	"os"
 )
@@ -15,8 +16,25 @@ const (
 	escape     byte = 0x1b // ESC, prefix byte for arrow keys and other escape sequences
 )
 
+type Location struct {
+	x int
+	y int
+}
+
+/**type Dimensions struct {
+	rows    int
+	columns int
+}**/
+
 func main() {
-	fd := int(os.Stdin.Fd())
+
+	//args
+	fpath := os.Args[1]    //position 0 is program
+	data := readcsv(fpath) //load a list of rows
+	location := Location{x: 0, y: 0}
+	//dims := Dimensions{rows: rows.Len(), columns: rows[0].Len()}
+
+	fd := int(os.Stdin.Fd()) //capture stdin
 
 	orig, err := enableRawMode(fd)
 	if err != nil {
@@ -31,16 +49,16 @@ func main() {
 		}
 	}()
 
-	rows, cols, err := getWindowSize(fd)
+	/**rows, cols, err := getWindowSize(fd)
 	if err != nil {
 		rows, cols = 24, 80
-	}
+	}**/
 
 	out := bufio.NewWriter(os.Stdout)
 	in := bufio.NewReader(os.Stdin)
 
-	var echoText, inputText string
-	draw(out, rows, cols, echoText, inputText)
+	var inputText string
+	draw(out, data, location, inputText)
 
 	for {
 		b, err := in.ReadByte()
@@ -57,7 +75,6 @@ func main() {
 				quit(out)
 				return
 			}
-			echoText = inputText
 			inputText = ""
 		case b == backspace || b == backspace2:
 			if len(inputText) > 0 {
@@ -69,23 +86,35 @@ func main() {
 			inputText += string(rune(b))
 		}
 
-		draw(out, rows, cols, echoText, inputText)
+		draw(out, data, location, inputText)
 	}
 }
 
 // draw renders the "echo" line in the middle of the screen and the "input"
 // line at the bottom in a single write to minimize flicker.
-func draw(w *bufio.Writer, rows, cols int, echoText, inputText string) {
-	echoLine := truncate(fmt.Sprintf("echo: %s", echoText), cols)
-	inputLine := truncate(fmt.Sprintf("input: %s", inputText), cols)
-	mid := rows / 2
+func draw(w *bufio.Writer, data list.List, location Location, inputText string) {
+	inputLine := truncate(fmt.Sprintf("input: %s", inputText), data.Len())
 
-	w.WriteString("\x1b[?25l")                            // hide cursor
-	w.WriteString("\x1b[2J")                              // clear screen
-	fmt.Fprintf(w, "\x1b[%d;1H%s", mid, echoLine)         // move cursor to (mid, 1) and print echo line
-	fmt.Fprintf(w, "\x1b[%d;1H%s", rows, inputLine)       // move cursor to (rows, 1) and print input line
-	fmt.Fprintf(w, "\x1b[%d;%dH", rows, len(inputLine)+1) // cursor at end of input
-	w.WriteString("\x1b[?25h")                            // show cursor
+	w.WriteString("\x1b[?25l") // hide cursor
+	w.WriteString("\x1b[2J")   // clear screen
+
+	r := 0
+	for row := data.Front(); row != nil; row = row.Next() {
+		location.x = r
+		r += 1
+		c := 0
+		col_list := row.Value.(*list.List)
+		for column := col_list.Front(); column != nil; column = column.Next() {
+			location.y = c * 20
+			fmt.Fprintf(w, "\x1b[%d;%dH", r, location.y) // move cursor?
+			fmt.Fprintf(w, "%s", column.Value)
+			c += 1
+		}
+	}
+
+	fmt.Fprintf(w, "\x1b[%d;1H%s", data.Len()+1, inputLine)       // move cursor to (rows, 1) and print input line
+	fmt.Fprintf(w, "\x1b[%d;%dH", data.Len()+1, len(inputLine)+1) // cursor at end of input
+	w.WriteString("\x1b[?25h")                                    // show cursor
 	w.Flush()
 }
 
