@@ -9,7 +9,7 @@ import (
 	"os"
 )
 
-func readcsv(filepath string) list {
+func readcsv(filepath string) list.List {
 	rows := list.New()
 
 	file, err := os.Open(filepath)
@@ -38,6 +38,6 @@ func readcsv(filepath string) list {
 		rows.PushBack(row)
 	}
 
-	return rows
+	return *rows
 
 }
