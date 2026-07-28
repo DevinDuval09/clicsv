@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"container/list"
 	"fmt"
+	"log"
 	"os"
 )
 
@@ -14,6 +15,10 @@ const (
 	backspace  byte = 0x7f // DEL, what most terminals send for the Backspace key
 	backspace2 byte = 0x08 // BS, backspace byte sent by some terminals/emulators instead of DEL
 	escape     byte = 0x1b // ESC, prefix byte for arrow keys and other escape sequences
+	uparrow    byte = 0x41
+	downarrow  byte = 0x42
+	rightarrow byte = 0x43
+	leftarrow  byte = 0x44
 )
 
 type Location struct {
@@ -26,12 +31,19 @@ type Location struct {
 	columns int
 }**/
 
+func absInt(val int) int {
+	if val < 0 {
+		return -val
+	}
+	return val
+}
+
 func main() {
 
 	//args
 	fpath := os.Args[1]    //position 0 is program
 	data := readcsv(fpath) //load a list of rows
-	location := Location{x: 0, y: 0}
+	location := Location{x: 1, y: 0}
 	//dims := Dimensions{rows: rows.Len(), columns: rows[0].Len()}
 
 	fd := int(os.Stdin.Fd()) //capture stdin
@@ -49,16 +61,26 @@ func main() {
 		}
 	}()
 
-	/**rows, cols, err := getWindowSize(fd)
+	win_rows, win_cols, err := getWindowSize(fd)
 	if err != nil {
-		rows, cols = 24, 80
-	}**/
+		win_rows, win_cols = 24, 80
+	}
+
+	row_count := win_rows
+	if data.Len() < row_count {
+		row_count = data.Len()
+	}
+
+	col_count := win_cols
+	if data.Len() < col_count {
+		col_count = data.Len()
+	}
 
 	out := bufio.NewWriter(os.Stdout)
 	in := bufio.NewReader(os.Stdin)
 
 	var inputText string
-	draw(out, data, location, inputText)
+	draw(out, data, location, inputText, row_count, col_count)
 
 	for {
 		b, err := in.ReadByte()
@@ -81,39 +103,68 @@ func main() {
 				inputText = inputText[:len(inputText)-1]
 			}
 		case b == escape:
-			// Not handled in this proof of concept; ignored.
+			// Should be arrow key
+			_, err := in.ReadByte() //throw away
+			if err != nil {
+				log.Fatalf("Error reading after escape byte: %s", err)
+			}
+			/**if next != 91 {
+				log.Fatalf("Expected 91 to throw away on arrow key, got %d", next)
+			}**/
+			arrow, err := in.ReadByte() //should indicate arrow key
+			if err != nil {
+				log.Fatalf("Error reading after escape byte: %s", err)
+			}
+			switch arrow {
+			case uparrow:
+				location.x -= 1
+			case downarrow:
+				location.x += 1
+			case rightarrow:
+				location.y += 1
+			case leftarrow:
+				location.y -= 1
+			}
 		case b >= 0x20 && b < 0x7f: // printable ASCII range (space through '~')
 			inputText += string(rune(b))
 		}
+		//make sure location is in screen
+		//TODO: Fix this
+		location.x = absInt(location.x+row_count+1) % row_count
+		location.y = absInt(location.y+col_count) % col_count
 
-		draw(out, data, location, inputText)
+		draw(out, data, location, inputText, row_count, col_count)
 	}
 }
 
 // draw renders the "echo" line in the middle of the screen and the "input"
 // line at the bottom in a single write to minimize flicker.
-func draw(w *bufio.Writer, data list.List, location Location, inputText string) {
+func draw(w *bufio.Writer, data list.List, location Location, inputText string, row_count int, col_count int) {
 	inputLine := truncate(fmt.Sprintf("input: %s", inputText), data.Len())
 
 	w.WriteString("\x1b[?25l") // hide cursor
 	w.WriteString("\x1b[2J")   // clear screen
 
-	r := 0
+	r := 1
 	for row := data.Front(); row != nil; row = row.Next() {
-		location.x = r
-		r += 1
 		c := 0
 		col_list := row.Value.(*list.List)
+		c_loc := 0
 		for column := col_list.Front(); column != nil; column = column.Next() {
-			location.y = c * 20
-			fmt.Fprintf(w, "\x1b[%d;%dH", r, location.y) // move cursor?
-			fmt.Fprintf(w, "%s", column.Value)
+			format := "%s"
+			if r == location.x && c == location.y {
+				format = "{%s}"
+			}
+			c_loc = c * 20
+			fmt.Fprintf(w, "\x1b[%d;%dH", r, c_loc) // move cursor?
+			fmt.Fprintf(w, format, column.Value)
 			c += 1
 		}
+		r += 1
 	}
 
 	fmt.Fprintf(w, "\x1b[%d;1H%s", data.Len()+1, inputLine)       // move cursor to (rows, 1) and print input line
-	fmt.Fprintf(w, "\x1b[%d;%dH", data.Len()+1, len(inputLine)+1) // cursor at end of input
+	fmt.Fprintf(w, "\x1b[%d;%dH", data.Len()+1, len(inputLine)+1) // move cursor end of input
 	w.WriteString("\x1b[?25h")                                    // show cursor
 	w.Flush()
 }
