@@ -72,8 +72,17 @@ func main() {
 	}
 
 	col_count := win_cols
-	if data.Len() < col_count {
-		col_count = data.Len()
+	var f_elem *list.Element
+	f_elem = data.Front()
+
+	// if there's a first element, use number of columns
+	if f_elem != nil {
+		f_row, ok := f_elem.Value.(*list.List)
+		if ok {
+			if f_row.Len() < col_count {
+				col_count = f_row.Len()
+			}
+		}
 	}
 
 	out := bufio.NewWriter(os.Stdout)
@@ -117,21 +126,21 @@ func main() {
 			}
 			switch arrow {
 			case uparrow:
-				location.x -= 1
+				location.x--
 			case downarrow:
-				location.x += 1
+				location.x++
 			case rightarrow:
-				location.y += 1
+				location.y++
 			case leftarrow:
-				location.y -= 1
+				location.y--
 			}
 		case b >= 0x20 && b < 0x7f: // printable ASCII range (space through '~')
 			inputText += string(rune(b))
 		}
 		//make sure location is in screen
-		//TODO: Fix this
-		location.x = absInt(location.x+row_count+1) % row_count
-		location.y = absInt(location.y+col_count) % col_count
+		//TODO: Fix this. Location x still hitting empty space
+		location.x = (location.x + row_count + 1) % (row_count + 1)
+		location.y = (location.y + col_count) % (col_count)
 
 		draw(out, data, location, inputText, row_count, col_count)
 	}
@@ -163,9 +172,9 @@ func draw(w *bufio.Writer, data list.List, location Location, inputText string, 
 		r += 1
 	}
 
-	fmt.Fprintf(w, "\x1b[%d;1H%s", data.Len()+1, inputLine)       // move cursor to (rows, 1) and print input line
-	fmt.Fprintf(w, "\x1b[%d;%dH", data.Len()+1, len(inputLine)+1) // move cursor end of input
-	w.WriteString("\x1b[?25h")                                    // show cursor
+	fmt.Fprintf(w, "\x1b[%d;1H%s", row_count+2, inputLine)       // move cursor to (rows, 1) and print input line
+	fmt.Fprintf(w, "\x1b[%d;%dH", row_count+2, len(inputLine)+1) // move cursor end of input
+	w.WriteString("\x1b[?25h")                                   // show cursor
 	w.Flush()
 }
 
